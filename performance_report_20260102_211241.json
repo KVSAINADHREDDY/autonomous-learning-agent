@@ -1,0 +1,67 @@
+{
+  "total_tests": 5,
+  "passed_tests": 1,
+  "failed_tests": 4,
+  "avg_execution_time": 12.311975240707397,
+  "avg_contexts_gathered": 12.0,
+  "avg_relevance_score": 0.36,
+  "success_rate": 20.0,
+  "timestamp": "2026-01-02T21:12:41.317454",
+  "test_results": [
+    {
+      "topic": "Python Functions",
+      "success": true,
+      "execution_time": 6.2391016483306885,
+      "contexts_gathered": 4,
+      "context_valid": true,
+      "avg_relevance_score": 0.6,
+      "summary_length": 1692,
+      "has_summary": true,
+      "error": null
+    },
+    {
+      "topic": "Machine Learning Basics",
+      "success": false,
+      "execution_time": 8.221326351165771,
+      "contexts_gathered": 14,
+      "context_valid": false,
+      "avg_relevance_score": 0.3,
+      "summary_length": 0,
+      "has_summary": false,
+      "error": null
+    },
+    {
+      "topic": "Data Structures",
+      "success": false,
+      "execution_time": 9.93142580986023,
+      "contexts_gathered": 14,
+      "context_valid": false,
+      "avg_relevance_score": 0.3,
+      "summary_length": 0,
+      "has_summary": false,
+      "error": null
+    },
+    {
+      "topic": "REST APIs",
+      "success": false,
+      "execution_time": 17.61612296104431,
+      "contexts_gathered": 14,
+      "context_valid": false,
+      "avg_relevance_score": 0.3,
+      "summary_length": 0,
+      "has_summary": false,
+      "error": null
+    },
+    {
+      "topic": "Database Fundamentals",
+      "success": false,
+      "execution_time": 19.551899433135986,
+      "contexts_gathered": 14,
+      "context_valid": false,
+      "avg_relevance_score": 0.3,
+      "summary_length": 0,
+      "has_summary": false,
+      "error": null
+    }
+  ]
+}

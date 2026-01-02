@@ -37,6 +37,9 @@ class LearningState(TypedDict):
     
     # Workflow messages/logs
     messages: Annotated[List[str], operator.add]
+    
+    # Generated summary of the learning context
+    summary: Optional[str]
 
 
 def create_initial_state(
@@ -62,5 +65,6 @@ def create_initial_state(
         retry_count=0,
         error=None,
         current_stage="initialized",
-        messages=[]
+        messages=[],
+        summary=None
     )

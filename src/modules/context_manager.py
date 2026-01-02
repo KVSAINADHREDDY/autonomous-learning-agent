@@ -1,7 +1,7 @@
 """Context management module for gathering and validating learning materials."""
 from typing import List, Tuple, Optional
 from datetime import datetime
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -326,5 +326,93 @@ Create a summary focusing on the learning objectives:""")
             return summary
             
         except Exception as e:
-            print(f"Error creating summary: {e}")
-            return "Error creating context summary."
+            print(f"Error creating LLM summary: {e}")
+            print("Generating comprehensive fallback summary from gathered context...")
+            
+            # Create a comprehensive fallback summary from the gathered context
+            fallback_summary = f"# 📚 Learning Summary: {checkpoint.topic}\n\n"
+            
+            # Section 1: Learning Objectives Overview
+            fallback_summary += "## 🎯 Learning Objectives\n\n"
+            for i, obj in enumerate(checkpoint.objectives, 1):
+                fallback_summary += f"**{i}. {obj}**\n\n"
+            
+            # Section 2: Key Concepts Extracted
+            fallback_summary += "---\n\n## 📖 Key Concepts & Information\n\n"
+            
+            # Sort contexts by relevance score (highest first)
+            sorted_contexts = sorted(relevant_contexts, key=lambda x: x.relevance_score or 0, reverse=True)
+            
+            for i, ctx in enumerate(sorted_contexts, 1):
+                source_name = ctx.source.replace("_", " ").title()
+                relevance = ctx.relevance_score or 0
+                
+                # Get full content (up to 800 chars for comprehensive summary)
+                content = ctx.content.strip()
+                
+                # Clean up the content - remove extra whitespace
+                content = " ".join(content.split())
+                
+                # Use more content for better summary
+                if len(content) > 800:
+                    content_preview = content[:800] + "..."
+                else:
+                    content_preview = content
+                
+                fallback_summary += f"### 📌 Source {i}: {source_name}\n"
+                fallback_summary += f"*Relevance Score: {'⭐' * int(relevance * 5)} ({relevance:.0%})*\n\n"
+                fallback_summary += f"{content_preview}\n\n"
+            
+            # Section 3: Summary by Objective
+            fallback_summary += "---\n\n## 🔍 Analysis by Learning Objective\n\n"
+            
+            all_content = " ".join([ctx.content.lower() for ctx in sorted_contexts])
+            
+            for obj in checkpoint.objectives:
+                fallback_summary += f"### ✅ {obj}\n\n"
+                
+                # Find relevant snippets for this objective
+                obj_keywords = obj.lower().split()
+                relevant_snippets = []
+                
+                for ctx in sorted_contexts:
+                    content_lower = ctx.content.lower()
+                    # Check if any keyword from objective appears in content
+                    if any(keyword in content_lower for keyword in obj_keywords if len(keyword) > 3):
+                        # Extract a relevant sentence or portion
+                        sentences = ctx.content.replace('\n', ' ').split('.')
+                        for sentence in sentences:
+                            if any(keyword in sentence.lower() for keyword in obj_keywords if len(keyword) > 3):
+                                clean_sentence = sentence.strip()
+                                if len(clean_sentence) > 20 and clean_sentence not in relevant_snippets:
+                                    relevant_snippets.append(clean_sentence)
+                                    if len(relevant_snippets) >= 2:
+                                        break
+                    if len(relevant_snippets) >= 2:
+                        break
+                
+                if relevant_snippets:
+                    for snippet in relevant_snippets:
+                        fallback_summary += f"- {snippet}.\n"
+                else:
+                    fallback_summary += f"- Related content found in the gathered sources above.\n"
+                
+                fallback_summary += "\n"
+            
+            # Section 4: Quick Reference
+            fallback_summary += "---\n\n## 📋 Quick Reference\n\n"
+            fallback_summary += f"- **Topic:** {checkpoint.topic}\n"
+            fallback_summary += f"- **Sources Analyzed:** {len(sorted_contexts)}\n"
+            fallback_summary += f"- **Average Relevance:** {sum(c.relevance_score or 0 for c in sorted_contexts) / len(sorted_contexts):.0%}\n"
+            
+            user_notes_count = sum(1 for c in sorted_contexts if c.source == "user_notes")
+            web_count = len(sorted_contexts) - user_notes_count
+            fallback_summary += f"- **From Your Notes:** {user_notes_count}\n"
+            fallback_summary += f"- **From Web Search:** {web_count}\n"
+            
+            fallback_summary += "\n---\n\n"
+            fallback_summary += "> 💡 **Tip:** To get AI-powered intelligent summaries with deeper analysis, "
+            fallback_summary += "configure your LLM API keys in the `.env` file. Supported providers: "
+            fallback_summary += "GitHub Models (free), OpenAI, Azure OpenAI, or Groq (free).\n"
+            
+            return fallback_summary

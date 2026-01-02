@@ -48,6 +48,10 @@ class LearningGraph:
             Updated state
         """
         print("\n=== DEFINE CHECKPOINT ===")
+        
+        # Reset deduplication cache for fresh searches with new topic
+        self.context_manager.reset_deduplication_cache()
+        
         checkpoint = state["checkpoint"]
         
         if checkpoint:
@@ -179,6 +183,9 @@ class LearningGraph:
             # Create summary
             summary = self.context_manager.summarize_context(contexts, checkpoint)
             print(f"\nContext Summary:\n{summary[:300]}...\n")
+            
+            # Store summary in state for UI display
+            state["summary"] = summary
             
             state["current_stage"] = "context_processed"
             state["messages"].append(
