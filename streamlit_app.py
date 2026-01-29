@@ -1,1112 +1,1396 @@
 """
-Autonomous Learning Agent Dashboard
-A modern, premium dashboard-style UI for the learning workflow
-With Advanced Features: Quiz, Flashcards, Export, Chat, and more!
+Autonomous Learning Agent - Streamlit Application
+A complete learning platform with study materials, quizzes, and Feynman teaching.
 """
 import streamlit as st
-import sys
 import os
-from pathlib import Path
-import time
 from datetime import datetime
-import json
-import base64
-from io import BytesIO
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from src.models.checkpoint import Checkpoint
-from src.models.state import create_initial_state
-from src.graph.learning_graph import create_learning_graph
-
-# Optional imports for advanced features
-try:
-    from langchain_openai import ChatOpenAI
-    from langchain_groq import ChatGroq
-    from dotenv import load_dotenv
-    load_dotenv()
-    LLM_AVAILABLE = True
-except ImportError:
-    LLM_AVAILABLE = False
-
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
+# Set page config first
 st.set_page_config(
-    page_title="Learning Agent | AI-Powered Study Assistant",
+    page_title="🎓 Autonomous Learning Agent",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Load Streamlit Cloud secrets into environment variables (for deployment)
+try:
+    from src.utils.secrets import load_secrets_to_env
+    load_secrets_to_env()
+except Exception:
+    pass
+
+# Import modules after streamlit config
+from src.data.checkpoints import (
+    get_all_checkpoints, 
+    get_checkpoint_by_id,
+    CheckpointDefinition
+)
+from src.graph.learning_graph import get_learning_workflow, reset_learning_workflow, LearningState
+from src.modules.progress_tracker import CheckpointStatus
+from src.modules.quiz_generator import Question
+
+
 # =========================================================
-# PREMIUM CSS STYLING - Modern SaaS Dashboard
+# CUSTOM CSS STYLING
 # =========================================================
-st.markdown("""
-<style>
-    /* ===== GLOBAL STYLES ===== */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+def apply_custom_css():
+    """Apply custom CSS for beautiful UI."""
+    st.markdown("""
+    <style>
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     
+    /* Global Styles */
     * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: 'Inter', sans-serif;
     }
     
-    .main {
-        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
-    }
-    
-    .block-container {
-        padding: 2rem 3rem;
+    /* Main container */
+    .main .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
         max-width: 1400px;
     }
     
-    /* ===== SIDEBAR STYLING ===== */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-        border-right: 1px solid rgba(255,255,255,0.1);
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Modern Headers */
+    h1 {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800;
+        font-size: 2.5rem !important;
+        letter-spacing: -0.02em;
     }
     
-    [data-testid="stSidebar"] .stMarkdown {
-        color: #e0e0e0;
+    h2, h3 {
+        color: #e2e8f0;
+        font-weight: 600;
     }
     
-    [data-testid="stSidebar"] label {
-        color: #b0b0b0 !important;
-        font-weight: 500;
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+    /* Glassmorphism Cards */
+    div[data-testid="stExpander"] {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
     }
     
-    [data-testid="stSidebar"] .stTextInput input,
-    [data-testid="stSidebar"] .stTextArea textarea {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 10px;
-        color: #fff;
-        padding: 12px;
-    }
-    
-    [data-testid="stSidebar"] .stTextInput input:focus,
-    [data-testid="stSidebar"] .stTextArea textarea:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-    }
-    
-    /* ===== HEADER STYLES ===== */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem 2.5rem;
+    /* Step Progress Indicator */
+    .step-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0;
+        margin: 2rem 0;
+        padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
         border-radius: 20px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.1);
     }
     
-    .main-header h1 {
-        color: white;
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin: 0;
-        letter-spacing: -0.5px;
+    .step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        z-index: 1;
     }
     
-    .main-header p {
-        color: rgba(255,255,255,0.85);
-        font-size: 1rem;
-        margin: 0.5rem 0 0 0;
-        font-weight: 400;
-    }
-    
-    /* ===== CARD STYLES ===== */
-    .card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        border: 1px solid rgba(0,0,0,0.05);
-        transition: all 0.3s ease;
-        color: #1e293b !important;
-    }
-    
-    .card:hover {
-        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-        transform: translateY(-2px);
-    }
-    
-    .card p, .card h1, .card h2, .card h3, .card strong {
-        color: #1e293b !important;
-    }
-    
-    /* ===== KPI CARDS ===== */
-    .kpi-card {
-        background: white;
-        padding: 1.25rem 1.5rem;
-        border-radius: 14px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-        border: 1px solid #e2e8f0;
-        text-align: center;
-    }
-    
-    .kpi-label {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .kpi-value {
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #1e293b;
-        margin: 0.25rem 0;
-    }
-    
-    /* ===== PROGRESS TRACKER ===== */
-    .progress-step {
-        flex: 1;
-        text-align: center;
-        padding: 1rem 0.5rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .step-complete {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
-    }
-    
-    .step-current {
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
-    }
-    
-    .step-pending {
-        background: #e2e8f0;
-        color: #64748b;
-    }
-    
-    /* ===== SUMMARY BOX ===== */
-    .summary-box {
-        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-        border: 1px solid #86efac;
-        border-radius: 16px;
-        padding: 2rem;
-        margin: 1.5rem 0;
-        color: #166534 !important;
-    }
-    
-    .summary-box p, .summary-box h1, .summary-box h2, .summary-box h3, .summary-box li, .summary-box strong, .summary-box span {
-        color: #166534 !important;
-    }
-    
-    .summary-title {
-        color: #166534;
-        font-size: 1.25rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-    }
-    
-    /* ===== QUIZ STYLES ===== */
-    .quiz-card {
-        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-        border: 1px solid #f59e0b;
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-    }
-    
-    .flashcard {
-        background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
-        border: 1px solid #6366f1;
-        border-radius: 16px;
-        padding: 2rem;
-        margin: 1rem 0;
-        text-align: center;
-        min-height: 150px;
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #312e81 !important;
-    }
-    
-    .flashcard h3 {
-        color: #312e81 !important;
-    }
-    
-    /* ===== CHAT STYLES ===== */
-    .chat-message {
-        padding: 1rem;
-        border-radius: 12px;
-        margin: 0.5rem 0;
-        color: #1e293b !important;
-    }
-    
-    .user-message {
-        background: #e0e7ff;
-        margin-left: 2rem;
-        color: #312e81 !important;
-    }
-    
-    .assistant-message {
-        background: #f0fdf4;
-        margin-right: 2rem;
-        color: #166534 !important;
-    }
-    
-    /* ===== BUTTON STYLES ===== */
-    .stButton > button {
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 0.75rem 2rem;
-        font-weight: 600;
-        font-size: 1rem;
+        font-weight: 700;
+        font-size: 1.2rem;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
     }
     
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(99, 102, 241, 0.4);
+    .step-circle.active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        box-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
     }
     
-    /* ===== TAB STYLES ===== */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: white;
-        padding: 0.5rem;
-        border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    .step-circle.completed {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
     }
     
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 0.75rem 1.5rem;
+    .step-circle.inactive {
+        background: rgba(255, 255, 255, 0.1);
+        color: #64748b;
+    }
+    
+    .step-label {
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        color: #94a3b8;
         font-weight: 500;
     }
     
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: white;
+    .step-connector {
+        width: 80px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        margin: 0 0.5rem;
+        border-radius: 2px;
     }
     
-    /* ===== METRICS ===== */
-    [data-testid="stMetric"] {
-        background: white;
-        padding: 1rem 1.5rem;
+    .step-connector.completed {
+        background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+    }
+    
+    /* Modern Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
         border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        border: 1px solid #e2e8f0;
+        padding: 0.75rem 1.5rem;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     }
     
-    [data-testid="stMetricLabel"] {
-        color: #64748b !important;
+    .stButton > button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
     }
     
-    [data-testid="stMetricValue"] {
-        color: #1e293b !important;
+    /* Progress bar */
+    .stProgress > div > div {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        border-radius: 10px;
     }
     
-    /* ===== MAIN CONTENT TEXT ===== */
-    .main h1, .main h2, .main h3 {
-        color: #1e293b !important;
-    }
-    
-    .main p, .main li {
-        color: #334155 !important;
-    }
-    
-    /* ===== SIDEBAR BRANDING ===== */
-    .sidebar-brand {
-        padding: 1.5rem;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        margin-bottom: 1.5rem;
-    }
-    
-    .sidebar-brand h2 {
-        color: white;
-        font-size: 1.25rem;
-        font-weight: 700;
-        margin: 0;
-    }
-    
-    .sidebar-brand p {
-        color: rgba(255,255,255,0.6);
-        font-size: 0.8rem;
-        margin: 0.25rem 0 0 0;
-    }
-    
-    /* ===== FOOTER ===== */
-    .footer {
-        text-align: center;
+    /* Question Cards */
+    .question-card {
+        background: linear-gradient(135deg, rgba(30, 58, 95, 0.6) 0%, rgba(13, 33, 55, 0.8) 100%);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
         padding: 2rem;
-        color: #64748b;
-        font-size: 0.85rem;
-        border-top: 1px solid #e2e8f0;
-        margin-top: 3rem;
+        margin: 1.5rem 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
     }
     
-    /* ===== DIVIDER ===== */
-    .section-divider {
-        height: 1px;
-        background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
-        margin: 2rem 0;
+    .question-card:hover {
+        border-color: rgba(102, 126, 234, 0.3);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
     }
     
-    /* ===== HIDE STREAMLIT BRANDING ===== */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    .question-card.correct {
+        border-left: 4px solid #10b981;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(13, 33, 55, 0.8) 100%);
+    }
     
-</style>
-""", unsafe_allow_html=True)
+    .question-card.incorrect {
+        border-left: 4px solid #ef4444;
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(13, 33, 55, 0.8) 100%);
+    }
+    
+    /* Metrics Cards */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+        backdrop-filter: blur(10px);
+        padding: 1.25rem;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+    
+    div[data-testid="stMetric"] label {
+        color: #94a3b8 !important;
+        font-size: 0.85rem !important;
+    }
+    
+    div[data-testid="stMetric"] div {
+        color: #e2e8f0 !important;
+    }
+    
+    /* Score Display */
+    .score-display {
+        font-size: 4rem;
+        font-weight: 800;
+        text-align: center;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    .score-pass { 
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+    }
+    
+    .score-fail { 
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+    }
+    
+    /* Topic Cards on Home */
+    .topic-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.4s ease;
+        cursor: pointer;
+    }
+    
+    .topic-card:hover {
+        transform: translateY(-5px);
+        border-color: rgba(102, 126, 234, 0.5);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Feynman Explanation Box */
+    .feynman-box {
+        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+        color: #065f46;
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.2);
+    }
+    
+    /* Hint Box */
+    .hint-box {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        color: #92400e;
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        box-shadow: 0 4px 15px rgba(251, 191, 36, 0.2);
+    }
+    
+    /* Radio buttons styling */
+    .stRadio > div {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 12px;
+        padding: 0.5rem;
+    }
+    
+    .stRadio > div > label {
+        color: #e2e8f0 !important;
+        padding: 0.75rem 1rem !important;
+        border-radius: 8px;
+        transition: all 0.2s ease;
+    }
+    
+    .stRadio > div > label:hover {
+        background: rgba(102, 126, 234, 0.2);
+    }
+    
+    /* Text areas */
+    .stTextArea textarea {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        color: #e2e8f0 !important;
+    }
+    
+    .stTextArea textarea:focus {
+        border-color: #667eea !important;
+        box-shadow: 0 0 20px rgba(102, 126, 234, 0.2) !important;
+    }
+    
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button {
+        width: 100%;
+        justify-content: flex-start;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: none;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(102, 126, 234, 0.3);
+        transform: translateX(5px);
+    }
+    
+    /* Tabs - Replace with Step Navigation */
+    .stTabs [data-baseweb="tab-list"] {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+        border-radius: 16px;
+        padding: 0.5rem;
+        gap: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 12px;
+        padding: 0.75rem 1.5rem;
+        color: #94a3b8;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(102, 126, 234, 0.2);
+        color: #e2e8f0;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+    }
+    
+    /* Success/Error/Warning boxes */
+    .stSuccess {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
+        border-left: 4px solid #10b981;
+        border-radius: 12px;
+    }
+    
+    .stError {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.2) 100%);
+        border-left: 4px solid #ef4444;
+        border-radius: 12px;
+    }
+    
+    .stWarning {
+        background: linear-gradient(135deg, rgba(251, 191, 36, 0.2) 0%, rgba(245, 158, 11, 0.2) 100%);
+        border-left: 4px solid #f59e0b;
+        border-radius: 12px;
+    }
+    
+    .stInfo {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+        border-left: 4px solid #667eea;
+        border-radius: 12px;
+    }
+    
+    /* Animated gradient background (optional effect) */
+    .gradient-text {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: gradient-shift 3s ease infinite;
+        background-size: 200% 200%;
+    }
+    
+    @keyframes gradient-shift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Pulse animation for active elements */
+    .pulse {
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4); }
+        70% { box-shadow: 0 0 0 15px rgba(102, 126, 234, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0); }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 
 # =========================================================
 # SESSION STATE INITIALIZATION
 # =========================================================
-if 'workflow_result' not in st.session_state:
-    st.session_state.workflow_result = None
-if 'execution_logs' not in st.session_state:
-    st.session_state.execution_logs = []
-if 'quiz_questions' not in st.session_state:
-    st.session_state.quiz_questions = []
-if 'flashcards' not in st.session_state:
-    st.session_state.flashcards = []
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'feynman_explanation' not in st.session_state:
-    st.session_state.feynman_explanation = None
+
+def init_session_state():
+    """Initialize session state variables."""
+    defaults = {
+        # Navigation
+        "current_page": "home",
+        "current_checkpoint_id": None,
+        
+        # Learning state
+        "learning_state": None,
+        "study_content": "",
+        "sources": [],
+        
+        # Quiz state
+        "questions": [],
+        "current_question_idx": 0,
+        "user_answers": {},
+        "quiz_submitted": False,
+        "quiz_result": None,
+        "show_hint": False,
+        
+        # Teaching state
+        "feynman_content": "",
+        "teaching_complete": False,
+        
+        # Progress
+        "attempt_number": 0,
+        "session_started": False
+    }
+    
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 
 # =========================================================
-# HELPER FUNCTIONS
+# COMPONENTS
 # =========================================================
 
-def get_config(key, default=None):
-    """Get configuration from Streamlit secrets or environment variables.
+def render_header():
+    """Render the main header."""
+    col1, col2 = st.columns([3, 1])
     
-    This allows the app to work both locally (with .env) and on Streamlit Cloud (with secrets).
-    """
-    # First try Streamlit secrets (for cloud deployment)
-    try:
-        if hasattr(st, 'secrets') and key in st.secrets:
-            return st.secrets[key]
-    except Exception:
-        pass
+    with col1:
+        st.title("🎓 Autonomous Learning Agent")
+        st.caption("Learn AI concepts with interactive quizzes and personalized teaching")
     
-    # Fall back to environment variable (for local development)
-    return os.getenv(key, default)
-
-def get_llm():
-    """Get LLM instance based on environment configuration"""
-    provider = get_config("MODEL_PROVIDER", "groq").lower()
-    
-    if provider == "groq":
-        api_key = get_config("GROQ_API_KEY")
-        if not api_key:
-            return None
-        return ChatGroq(
-            model="llama-3.3-70b-versatile",
-            api_key=api_key,
-            temperature=0.7
-        )
-    elif provider == "openai":
-        api_key = get_config("OPENAI_API_KEY")
-        if not api_key:
-            return None
-        return ChatOpenAI(
-            model="gpt-4o-mini",
-            api_key=api_key,
-            temperature=0.7
-        )
-    return None
+    with col2:
+        if st.session_state.session_started:
+            workflow = get_learning_workflow()
+            progress = workflow.get_progress_summary()
+            completion = progress.get("completion_percentage", 0)
+            st.metric("Progress", f"{completion:.0f}%")
 
 
-def log_step(message, status="info"):
-    """Add a log entry with timestamp"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    st.session_state.execution_logs.append({
-        'time': timestamp,
-        'message': message,
-        'status': status
-    })
-
-def run_workflow(checkpoint, user_notes):
-    """Execute the learning workflow with real-time updates"""
-    log_step("Starting workflow execution", "info")
+def render_progress_sidebar():
+    """Render the progress sidebar."""
+    st.sidebar.markdown("### 📊 Learning Progress")
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    workflow = get_learning_workflow()
+    checkpoints = get_all_checkpoints()
     
-    try:
-        log_step("Initializing state", "info")
-        status_text.text("🔄 Initializing learning state...")
-        progress_bar.progress(10)
-        time.sleep(0.3)
+    if st.session_state.session_started:
+        progress = workflow.get_progress_summary()
         
-        state = create_initial_state(
-            checkpoint=checkpoint,
-            user_notes=user_notes
-        )
+        # Progress bar
+        completion = progress.get("completion_percentage", 0)
+        st.sidebar.progress(completion / 100)
+        st.sidebar.caption(f"{progress.get('completed', 0)}/{progress.get('total_checkpoints', 0)} checkpoints completed")
         
-        log_step("Creating workflow graph", "info")
-        status_text.text("📊 Building workflow graph...")
-        progress_bar.progress(25)
-        time.sleep(0.3)
-        
-        graph = create_learning_graph()
-        
-        log_step("Executing workflow nodes", "info")
-        status_text.text("⚙️ Processing your learning materials...")
-        progress_bar.progress(50)
-        
-        result = graph.invoke(state)
-        
-        progress_bar.progress(100)
-        status_text.text("✅ Workflow completed successfully!")
-        
-        if result.get('error'):
-            log_step(f"Completed with warning: {result['error']}", "warning")
+        st.sidebar.markdown("---")
+    
+    # Checkpoint list
+    st.sidebar.markdown("### 📚 Topics")
+    
+    for i, cp in enumerate(checkpoints, 1):
+        # Get status icon
+        if st.session_state.session_started:
+            try:
+                cp_progress = workflow.progress_tracker._get_progress(cp.id)
+                if cp_progress.status == CheckpointStatus.PASSED:
+                    icon = "✅"
+                elif cp_progress.status in [CheckpointStatus.IN_PROGRESS, CheckpointStatus.STUDYING]:
+                    icon = "📖"
+                elif cp_progress.status == CheckpointStatus.NEEDS_TEACHING:
+                    icon = "🎓"
+                else:
+                    icon = "⬜"
+            except:
+                icon = "⬜"
         else:
-            log_step("Workflow completed successfully", "success")
+            icon = "⬜"
         
-        return result
-        
-    except Exception as e:
-        log_step(f"Error: {str(e)}", "error")
-        st.error(f"❌ Error: {str(e)}")
-        return None
+        if st.sidebar.button(f"{icon} {i}. {cp.topic}", key=f"nav_{cp.id}", use_container_width=True):
+            st.session_state.current_checkpoint_id = cp.id
+            st.session_state.current_page = "checkpoint"
+            st.rerun()
 
-def render_progress_tracker(current_stage):
-    """Render the workflow progress tracker"""
-    stages = [
-        ("initialized", "Init", "🚀"),
-        ("checkpoint_defined", "Checkpoint", "📌"),
-        ("context_gathered", "Gathered", "📚"),
-        ("context_validated", "Validated", "✓"),
-        ("context_processed", "Processed", "✨")
-    ]
+
+def render_home_page():
+    """Render the home page with modern design."""
     
-    stage_order = [s[0] for s in stages]
-    current_idx = stage_order.index(current_stage) if current_stage in stage_order else 0
-    
-    cols = st.columns(len(stages))
-    for idx, (stage_id, label, icon) in enumerate(stages):
-        with cols[idx]:
-            if idx < current_idx:
-                st.markdown(f'<div class="progress-step step-complete">{icon}<br>{label}</div>', unsafe_allow_html=True)
-            elif idx == current_idx:
-                st.markdown(f'<div class="progress-step step-current">{icon}<br>{label}</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="progress-step step-pending">{icon}<br>{label}</div>', unsafe_allow_html=True)
-
-# =========================================================
-# FEATURE: EXPORT FUNCTIONS
-# =========================================================
-
-def export_to_markdown(topic, objectives, summary):
-    """Export summary to Markdown format"""
-    md_content = f"""# Learning Summary: {topic}
-
-## 📅 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-## 🎯 Learning Objectives
-"""
-    for i, obj in enumerate(objectives, 1):
-        md_content += f"{i}. {obj}\n"
-    
-    md_content += f"""
-## 📝 Summary
-
-{summary}
-
----
-*Generated by Autonomous Learning Agent*
-"""
-    return md_content
-
-def get_download_link(content, filename, file_type="text/markdown"):
-    """Generate download link for content"""
-    b64 = base64.b64encode(content.encode()).decode()
-    return f'<a href="data:{file_type};base64,{b64}" download="{filename}" style="text-decoration:none;"><button style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;">📥 Download {filename}</button></a>'
-
-# =========================================================
-# FEATURE: QUIZ GENERATOR
-# =========================================================
-
-def generate_quiz(topic, summary, num_questions=5):
-    """Generate quiz questions from summary"""
-    if not LLM_AVAILABLE:
-        return []
-    
-    try:
-        llm = get_llm()
-        if not llm:
-            return []
-        
-        prompt = f"""Based on this learning summary about "{topic}", generate {num_questions} multiple-choice quiz questions.
-
-Summary:
-{summary[:2000]}
-
-Return ONLY a JSON array with this exact format:
-[
-    {{
-        "question": "Question text here?",
-        "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-        "correct": "A",
-        "explanation": "Brief explanation why this is correct"
-    }}
-]
-
-Generate {num_questions} questions that test understanding of key concepts."""
-
-        response = llm.invoke(prompt)
-        content = response.content
-        
-        # Extract JSON from response
-        start = content.find('[')
-        end = content.rfind(']') + 1
-        if start != -1 and end > start:
-            questions = json.loads(content[start:end])
-            return questions
-    except Exception as e:
-        st.error(f"Quiz generation error: {e}")
-    return []
-
-# =========================================================
-# FEATURE: FLASHCARD GENERATOR
-# =========================================================
-
-def generate_flashcards(topic, summary, num_cards=5):
-    """Generate flashcards from summary"""
-    if not LLM_AVAILABLE:
-        return []
-    
-    try:
-        llm = get_llm()
-        if not llm:
-            return []
-        
-        prompt = f"""Based on this learning summary about "{topic}", create {num_cards} study flashcards.
-
-Summary:
-{summary[:2000]}
-
-Return ONLY a JSON array with this exact format:
-[
-    {{
-        "front": "Term or Question",
-        "back": "Definition or Answer"
-    }}
-]
-
-Create {num_cards} flashcards covering the most important concepts."""
-
-        response = llm.invoke(prompt)
-        content = response.content
-        
-        start = content.find('[')
-        end = content.rfind(']') + 1
-        if start != -1 and end > start:
-            cards = json.loads(content[start:end])
-            return cards
-    except Exception as e:
-        st.error(f"Flashcard generation error: {e}")
-    return []
-
-# =========================================================
-# FEATURE: FEYNMAN EXPLANATION
-# =========================================================
-
-def generate_feynman_explanation(topic, summary):
-    """Generate simple Feynman-style explanation"""
-    if not LLM_AVAILABLE:
-        return None
-    
-    try:
-        llm = get_llm()
-        if not llm:
-            return None
-        
-        prompt = f"""You are Richard Feynman, the famous physicist known for explaining complex topics simply.
-
-Explain "{topic}" to a 12-year-old student using:
-- Simple everyday language
-- Real-world analogies and examples
-- No jargon or technical terms
-- Engaging, conversational tone
-
-Context from study materials:
-{summary[:1500]}
-
-Start your explanation with an engaging hook and make it fun to read!"""
-
-        response = llm.invoke(prompt)
-        return response.content
-    except Exception as e:
-        st.error(f"Feynman explanation error: {e}")
-    return None
-
-# =========================================================
-# FEATURE: CHAT WITH SUMMARY
-# =========================================================
-
-def chat_with_summary(question, summary, chat_history):
-    """Answer questions about the summary"""
-    if not LLM_AVAILABLE:
-        return "Chat feature requires LLM configuration."
-    
-    try:
-        llm = get_llm()
-        if not llm:
-            return "LLM not configured."
-        
-        history_text = "\n".join([f"User: {h['user']}\nAssistant: {h['assistant']}" for h in chat_history[-3:]])
-        
-        prompt = f"""You are a helpful study assistant. Answer questions based on this learning summary.
-
-Summary:
-{summary[:2000]}
-
-Previous conversation:
-{history_text}
-
-User's question: {question}
-
-Provide a helpful, accurate answer based on the summary. If the answer isn't in the summary, say so."""
-
-        response = llm.invoke(prompt)
-        return response.content
-    except Exception as e:
-        return f"Error: {e}"
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown('''
-        <div class="sidebar-brand">
-            <h2>🎓 Learning Agent</h2>
-            <p>AI-Powered Study Assistant</p>
-        </div>
-    ''', unsafe_allow_html=True)
-    
-    # Navigation
-    st.markdown("#### 📍 Navigation")
-    page = st.radio(
-        "Select View",
-        ["🏠 Dashboard", "🎯 Quiz & Flashcards", "💬 Chat", "📊 Analytics", "⚙️ Settings"],
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Learning Checkpoint Input
-    st.markdown("#### 📝 Learning Checkpoint")
-    
-    topic = st.text_input(
-        "Topic",
-        value="",
-        placeholder="e.g., Machine Learning Basics",
-        help="What topic do you want to learn?"
-    )
-    
-    objectives_text = st.text_area(
-        "Learning Objectives",
-        value="",
-        placeholder="Enter objectives (one per line)",
-        height=100,
-        help="What do you want to achieve?"
-    )
-    
-    # Summary Length Control
-    summary_length = st.select_slider(
-        "Summary Length",
-        options=["Short", "Medium", "Detailed"],
-        value="Medium",
-        help="Control the length of generated summary"
-    )
-    
-    user_notes = st.text_area(
-        "Your Notes (Optional)",
-        value="",
-        placeholder="Paste your study notes here...",
-        height=120,
-        help="Add any existing notes or materials"
-    )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    with st.expander("ℹ️ About", expanded=False):
-        st.markdown("""
-        **Autonomous Learning Agent v2.0**
-        
-        Features:
-        - 📚 Smart Context Gathering
-        - 🎯 Quiz Generator
-        - 📝 Flashcard Creator
-        - 🧠 Feynman Explanations
-        - 💬 Chat with Summary
-        - 📥 Export to Markdown
-        
-        *Powered by LangGraph & Groq*
-        """)
-
-# =========================================================
-# MAIN CONTENT
-# =========================================================
-
-# Header
-st.markdown('''
-    <div class="main-header">
-        <h1>🎓 Autonomous Learning Agent</h1>
-        <p>Transform any topic into a structured learning experience with AI-powered features.</p>
+    # Subtitle Section (title already in header)
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem 0 2rem 0;">
+        <p style="font-size: 1.2rem; color: #94a3b8; max-width: 600px; margin: 0 auto;">
+            Master AI concepts with personalized quizzes, instant feedback, and Feynman-style explanations
+        </p>
     </div>
-''', unsafe_allow_html=True)
-
-# Parse objectives
-objectives = [obj.strip() for obj in objectives_text.split('\n') if obj.strip()]
-
-# =========================================================
-# PAGE: DASHBOARD
-# =========================================================
-if page == "🏠 Dashboard":
+    """, unsafe_allow_html=True)
     
-    # Quick Stats Row
+    st.markdown("")
+    
+    # Feature Cards
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown(f'''
-            <div class="kpi-card">
-                <div class="kpi-label">Topic</div>
-                <div class="kpi-value" style="font-size: 1rem;">{topic if topic else "Not Set"}</div>
-            </div>
-        ''', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align: center; padding: 1.5rem; background: rgba(102, 126, 234, 0.1); border-radius: 16px; border: 1px solid rgba(102, 126, 234, 0.3);">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📚</div>
+            <div style="font-weight: 600; color: #e2e8f0;">Smart Study</div>
+            <div style="font-size: 0.85rem; color: #94a3b8;">Curated materials</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown(f'''
-            <div class="kpi-card">
-                <div class="kpi-label">Objectives</div>
-                <div class="kpi-value">{len(objectives)}</div>
-            </div>
-        ''', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align: center; padding: 1.5rem; background: rgba(16, 185, 129, 0.1); border-radius: 16px; border: 1px solid rgba(16, 185, 129, 0.3);">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🃏</div>
+            <div style="font-weight: 600; color: #e2e8f0;">Flashcards</div>
+            <div style="font-size: 0.85rem; color: #94a3b8;">Quick memorization</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col3:
-        contexts_count = len(st.session_state.workflow_result.get('gathered_contexts', [])) if st.session_state.workflow_result else 0
-        st.markdown(f'''
-            <div class="kpi-card">
-                <div class="kpi-label">Sources</div>
-                <div class="kpi-value">{contexts_count}</div>
-            </div>
-        ''', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align: center; padding: 1.5rem; background: rgba(251, 191, 36, 0.1); border-radius: 16px; border: 1px solid rgba(251, 191, 36, 0.3);">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎓</div>
+            <div style="font-weight: 600; color: #e2e8f0;">Feynman AI</div>
+            <div style="font-size: 0.85rem; color: #94a3b8;">Simple explanations</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col4:
-        status = "Ready" if not st.session_state.workflow_result else "Complete"
-        st.markdown(f'''
-            <div class="kpi-card">
-                <div class="kpi-label">Status</div>
-                <div class="kpi-value" style="font-size: 1rem;">{status}</div>
-            </div>
-        ''', unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align: center; padding: 1.5rem; background: rgba(239, 68, 68, 0.1); border-radius: 16px; border: 1px solid rgba(239, 68, 68, 0.3);">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
+            <div style="font-weight: 600; color: #e2e8f0;">Track Progress</div>
+            <div style="font-size: 0.85rem; color: #94a3b8;">See improvement</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("")
+    st.markdown("---")
+    st.markdown("")
     
-    # Main Action Section
-    col_left, col_right = st.columns([2, 1])
+    # Topics Section
+    st.markdown("### 📚 Available Learning Topics")
+    st.markdown("")
     
-    with col_left:
-        st.markdown("### 🚀 Workflow Execution")
-        
-        if topic and objectives:
-            if st.button("▶️ Run Learning Workflow", use_container_width=True, type="primary"):
-                st.session_state.execution_logs = []
-                st.session_state.quiz_questions = []
-                st.session_state.flashcards = []
-                st.session_state.feynman_explanation = None
-                st.session_state.chat_history = []
-                
-                checkpoint = Checkpoint(
-                    topic=topic,
-                    objectives=objectives
-                )
-                
-                with st.spinner(""):
-                    result = run_workflow(checkpoint, user_notes if user_notes else None)
-                    st.session_state.workflow_result = result
-                
-                if result and not result.get('error'):
-                    st.balloons()
-        else:
-            st.info("👈 Enter a **Topic** and at least one **Learning Objective** in the sidebar to get started.")
+    checkpoints = get_all_checkpoints()
     
-    with col_right:
-        st.markdown("### 📋 Checkpoint Preview")
-        if topic:
-            st.markdown(f"**Topic:** {topic}")
-            if objectives:
-                st.markdown("**Objectives:**")
-                for i, obj in enumerate(objectives, 1):
-                    st.markdown(f"  {i}. {obj}")
-        else:
-            st.markdown("*No checkpoint defined yet*")
+    # Display topics in a grid
+    for i in range(0, len(checkpoints), 2):
+        cols = st.columns(2)
+        for j, col in enumerate(cols):
+            if i + j < len(checkpoints):
+                cp = checkpoints[i + j]
+                with col:
+                    # Topic Card
+                    difficulty_color = {"beginner": "#10b981", "intermediate": "#f59e0b", "advanced": "#ef4444"}.get(cp.difficulty.lower(), "#667eea")
+                    st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+                        border-radius: 16px;
+                        padding: 1.5rem;
+                        margin-bottom: 1rem;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        transition: all 0.3s ease;
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                            <h4 style="margin: 0; color: #e2e8f0;">{i + j + 1}. {cp.topic}</h4>
+                            <span style="
+                                background: {difficulty_color}22;
+                                color: {difficulty_color};
+                                padding: 0.25rem 0.75rem;
+                                border-radius: 20px;
+                                font-size: 0.75rem;
+                                font-weight: 600;
+                            ">{cp.difficulty.title()}</span>
+                        </div>
+                        <div style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem;">
+                            ⏱️ {cp.estimated_minutes} min • 🎯 {len(cp.objectives)} objectives
+                        </div>
+                        <div style="color: #64748b; font-size: 0.85rem;">
+                            {cp.objectives[0][:60]}...
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
     
-    # Results Section
-    if st.session_state.workflow_result:
-        result = st.session_state.workflow_result
+    st.markdown("")
+    st.markdown("---")
+    st.markdown("")
+    
+    # Start Button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <p style="color: #94a3b8; font-size: 1rem;">Ready to begin your learning journey?</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-        
-        # Progress Tracker
-        st.markdown("### 📊 Workflow Progress")
-        render_progress_tracker(result.get('current_stage', 'initialized'))
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Metrics Row
+        if st.button("🚀 Start Learning Journey", use_container_width=True, type="primary"):
+            # Reset workflow to pick up latest .env settings
+            reset_learning_workflow()
+            
+            # Initialize learning session
+            workflow = get_learning_workflow()
+            workflow.start_learning_session(checkpoints)
+            
+            st.session_state.session_started = True
+            st.session_state.current_checkpoint_id = checkpoints[0].id
+            st.session_state.current_page = "checkpoint"
+            st.session_state.current_step = "study"  # Reset to study step
+            st.rerun()
+
+
+def render_checkpoint_page():
+    """Render a checkpoint learning page with step-based navigation."""
+    checkpoint_id = st.session_state.current_checkpoint_id
+    
+    # Initialize current step in session state
+    if "current_step" not in st.session_state:
+        st.session_state.current_step = "study"
+    
+    if not checkpoint_id:
+        st.warning("No checkpoint selected. Please select a topic from the sidebar.")
+        return
+    
+    try:
+        checkpoint = get_checkpoint_by_id(checkpoint_id)
+    except ValueError:
+        st.error(f"Checkpoint not found: {checkpoint_id}")
+        return
+    
+    workflow = get_learning_workflow()
+    
+    # Get progress for step states
+    try:
+        progress = workflow.progress_tracker._get_progress(checkpoint_id)
+        study_complete = progress.study_material_loaded
+        flashcards_viewed = st.session_state.get("flashcards_viewed", False)
+        quiz_complete = st.session_state.quiz_submitted
+        has_results = st.session_state.quiz_result is not None
+    except:
+        study_complete = False
+        flashcards_viewed = False
+        quiz_complete = False
+        has_results = False
+    
+    # Topic Header with gradient
+    st.markdown(f"""
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h1 style="margin-bottom: 0.5rem;">📖 {checkpoint.topic}</h1>
+        <p style="color: #94a3b8; font-size: 1.1rem;">Master this topic step by step</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Step Progress Indicator (4 steps: Study -> Quiz -> Flashcards -> Results)
+    step_1_class = "completed" if study_complete else ("active" if st.session_state.current_step == "study" else "inactive")
+    step_2_class = "completed" if quiz_complete else ("active" if st.session_state.current_step == "quiz" else "inactive")
+    step_3_class = "completed" if flashcards_viewed else ("active" if st.session_state.current_step == "flashcards" else "inactive")
+    step_4_class = "active" if st.session_state.current_step == "results" and has_results else "inactive"
+    
+    connector_1_class = "completed" if study_complete else ""
+    connector_2_class = "completed" if quiz_complete else ""
+    connector_3_class = "completed" if flashcards_viewed else ""
+    
+    st.markdown(f"""
+    <div class="step-container">
+        <div class="step">
+            <div class="step-circle {step_1_class}">{"✓" if study_complete else "1"}</div>
+            <div class="step-label">Study</div>
+        </div>
+        <div class="step-connector {connector_1_class}"></div>
+        <div class="step">
+            <div class="step-circle {step_2_class}">{"✓" if quiz_complete else "2"}</div>
+            <div class="step-label">Quiz</div>
+        </div>
+        <div class="step-connector {connector_2_class}"></div>
+        <div class="step">
+            <div class="step-circle {step_3_class}">{"✓" if flashcards_viewed else "3"}</div>
+            <div class="step-label">Cards</div>
+        </div>
+        <div class="step-connector {connector_3_class}"></div>
+        <div class="step">
+            <div class="step-circle {step_4_class}">{"✓" if has_results and st.session_state.quiz_result.passed else "4"}</div>
+            <div class="step-label">Results</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Step Navigation Buttons
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("📚 Study", use_container_width=True, 
+                     type="primary" if st.session_state.current_step == "study" else "secondary"):
+            st.session_state.current_step = "study"
+            st.rerun()
+    with col2:
+        quiz_disabled = not study_complete
+        if st.button("📝 Quiz", use_container_width=True, disabled=quiz_disabled,
+                     type="primary" if st.session_state.current_step == "quiz" else "secondary"):
+            st.session_state.current_step = "quiz"
+            st.rerun()
+    with col3:
+        flashcards_disabled = not study_complete
+        if st.button("🃏 Flashcards", use_container_width=True, disabled=flashcards_disabled,
+                     type="primary" if st.session_state.current_step == "flashcards" else "secondary"):
+            st.session_state.current_step = "flashcards"
+            st.rerun()
+    with col4:
+        results_disabled = not has_results
+        if st.button("📊 Results", use_container_width=True, disabled=results_disabled,
+                     type="primary" if st.session_state.current_step == "results" else "secondary"):
+            st.session_state.current_step = "results"
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Progress Metrics
+    try:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Stage", result.get('current_stage', 'N/A').replace('_', ' ').title())
+            st.metric("🎯 Attempts", f"{progress.attempt_count}/{progress.max_attempts}")
         with col2:
-            st.metric("Contexts", len(result.get('gathered_contexts', [])))
+            st.metric("🏆 Best Score", f"{progress.best_score * 100:.0f}%")
         with col3:
-            st.metric("Valid", "✅ Yes" if result.get('context_valid') else "❌ No")
+            status_map = {
+                CheckpointStatus.NOT_STARTED: "📋 Not Started",
+                CheckpointStatus.STUDYING: "📖 Studying",
+                CheckpointStatus.IN_PROGRESS: "📝 In Progress",
+                CheckpointStatus.QUIZ_IN_PROGRESS: "📝 Quiz Active",
+                CheckpointStatus.NEEDS_TEACHING: "🎓 Review",
+                CheckpointStatus.PASSED: "✅ Passed",
+                CheckpointStatus.FAILED: "❌ Failed"
+            }
+            st.metric("📊 Status", status_map.get(progress.status, "Unknown"))
         with col4:
-            st.metric("Retries", result.get('retry_count', 0))
-        
-        # Error display
-        if result.get('error'):
-            st.error(f"⚠️ **Warning:** {result['error']}")
-        
-        # Summary Section
-        if result.get('summary'):
-            st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown("### 📝 Learning Summary")
-            with col2:
-                # Export Button
-                md_content = export_to_markdown(topic, objectives, result['summary'])
-                st.markdown(get_download_link(md_content, f"{topic.replace(' ', '_')}_summary.md"), unsafe_allow_html=True)
-            
-            st.markdown(f'''<div class="summary-box">{result['summary']}</div>''', unsafe_allow_html=True)
-            
-            # Feynman Explanation Button
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🧠 Generate Feynman Explanation", use_container_width=True):
-                with st.spinner("Creating simple explanation..."):
-                    explanation = generate_feynman_explanation(topic, result['summary'])
-                    st.session_state.feynman_explanation = explanation
-            
-            if st.session_state.feynman_explanation:
-                st.markdown("### 🧠 Feynman Explanation (ELI12)")
-                st.markdown(f'''<div class="card">{st.session_state.feynman_explanation}</div>''', unsafe_allow_html=True)
-
-# =========================================================
-# PAGE: QUIZ & FLASHCARDS
-# =========================================================
-elif page == "🎯 Quiz & Flashcards":
-    st.markdown("### 🎯 Quiz & Flashcards")
+            st.metric("⚡ Difficulty", checkpoint.difficulty.title())
+    except:
+        pass
     
-    if st.session_state.workflow_result and st.session_state.workflow_result.get('summary'):
-        summary = st.session_state.workflow_result['summary']
+    st.markdown("---")
+    
+    # Learning objectives in a nice card
+    with st.expander("🎯 Learning Objectives", expanded=False):
+        for i, obj in enumerate(checkpoint.objectives, 1):
+            st.markdown(f"**{i}.** {obj}")
+    
+    st.markdown("")
+    
+    # Render current step content
+    if st.session_state.current_step == "study":
+        render_study_tab(checkpoint, workflow)
+    elif st.session_state.current_step == "quiz":
+        render_quiz_tab(checkpoint, workflow)
+    elif st.session_state.current_step == "flashcards":
+        render_flashcards_tab(checkpoint, workflow)
+    elif st.session_state.current_step == "results":
+        render_results_tab(checkpoint, workflow)
+
+
+def render_study_tab(checkpoint: CheckpointDefinition, workflow):
+    """Render the study material tab."""
+    
+    # User notes input
+    user_notes = st.text_area(
+        "📝 Add your own notes (optional)",
+        placeholder="Paste any notes you have about this topic...",
+        height=100
+    )
+    
+    # Load study material button
+    if st.button("📚 Load Study Material", type="primary"):
+        with st.spinner("Collecting study material..."):
+            content, sources = workflow.collect_study_material(checkpoint, user_notes)
+            st.session_state.study_content = content
+            st.session_state.sources = sources
+            workflow.progress_tracker.mark_study_complete(checkpoint.id)
+    
+    # Display study content
+    if st.session_state.study_content:
+        st.markdown("### 📖 Study Material")
         
-        tab1, tab2 = st.tabs(["📝 Quiz", "📇 Flashcards"])
+        # Source info
+        st.info(f"📚 Content from {len(st.session_state.sources)} sources")
         
-        with tab1:
-            st.markdown("#### 📝 Quiz Generator")
-            
-            num_questions = st.slider("Number of Questions", 3, 10, 5)
-            
-            if st.button("🎲 Generate Quiz", use_container_width=True):
-                with st.spinner("Generating quiz questions..."):
-                    questions = generate_quiz(topic, summary, num_questions)
-                    st.session_state.quiz_questions = questions
-            
-            if st.session_state.quiz_questions:
+        # Main content
+        st.markdown(st.session_state.study_content)
+        
+        # Sources accordion
+        with st.expander("📋 View Sources"):
+            for source in st.session_state.sources:
+                st.markdown(f"**{source.get('title', 'Source')}** ({source.get('type', 'unknown')})")
+                if source.get('url'):
+                    st.caption(source['url'])
                 st.markdown("---")
-                for i, q in enumerate(st.session_state.quiz_questions, 1):
-                    with st.expander(f"Question {i}: {q['question'][:50]}...", expanded=True):
-                        st.markdown(f"**{q['question']}**")
-                        
-                        answer = st.radio(
-                            "Select your answer:",
-                            q['options'],
-                            key=f"quiz_{i}"
-                        )
-                        
-                        if st.button(f"Check Answer", key=f"check_{i}"):
-                            selected_letter = answer[0] if answer else ""
-                            if selected_letter == q['correct']:
-                                st.success(f"✅ Correct! {q['explanation']}")
-                            else:
-                                st.error(f"❌ Incorrect. The correct answer is {q['correct']}. {q['explanation']}")
         
-        with tab2:
-            st.markdown("#### 📇 Flashcard Generator")
+        st.success("✅ Study material loaded! When ready, go to the Flashcards or Quiz tab.")
+    
+    elif checkpoint.notes:
+        # Show preview of predefined notes
+        st.markdown("### 📖 Quick Preview")
+        st.markdown(checkpoint.notes[:500] + "...")
+        st.caption("Click 'Load Study Material' to see the full content")
+
+
+def render_flashcards_tab(checkpoint: CheckpointDefinition, workflow):
+    """Render the flashcards tab with interactive flip cards."""
+    
+    # Initialize flashcard state
+    if "flashcards" not in st.session_state:
+        st.session_state.flashcards = []
+    if "current_card_idx" not in st.session_state:
+        st.session_state.current_card_idx = 0
+    if "card_flipped" not in st.session_state:
+        st.session_state.card_flipped = False
+    if "cards_reviewed" not in st.session_state:
+        st.session_state.cards_reviewed = set()
+    
+    # Check if study is complete
+    try:
+        progress = workflow.progress_tracker._get_progress(checkpoint.id)
+        if not progress.study_material_loaded:
+            st.warning("📚 Please complete the study material first!")
+            return
+    except:
+        st.warning("Please start the learning session from the home page.")
+        return
+    
+    # Generate flashcards if needed
+    if not st.session_state.flashcards:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div style="text-align: center; padding: 2rem;">
+                <div style="font-size: 4rem; margin-bottom: 1rem;">🃏</div>
+                <h3 style="color: #e2e8f0;">Study with Flashcards</h3>
+                <p style="color: #94a3b8;">Interactive cards to help you memorize key concepts</p>
+            </div>
+            """, unsafe_allow_html=True)
             
-            num_cards = st.slider("Number of Flashcards", 3, 10, 5)
-            
-            if st.button("🎴 Generate Flashcards", use_container_width=True):
+            if st.button("🃏 Generate Flashcards", type="primary", use_container_width=True):
                 with st.spinner("Creating flashcards..."):
-                    cards = generate_flashcards(topic, summary, num_cards)
-                    st.session_state.flashcards = cards
-            
-            if st.session_state.flashcards:
-                st.markdown("---")
-                
-                if 'current_card' not in st.session_state:
-                    st.session_state.current_card = 0
-                if 'show_answer' not in st.session_state:
-                    st.session_state.show_answer = False
-                
-                card = st.session_state.flashcards[st.session_state.current_card]
-                
-                st.markdown(f"**Card {st.session_state.current_card + 1} of {len(st.session_state.flashcards)}**")
-                
-                st.markdown(f'''
-                    <div class="flashcard">
-                        <h3>{card['back'] if st.session_state.show_answer else card['front']}</h3>
-                    </div>
-                ''', unsafe_allow_html=True)
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("⬅️ Previous"):
-                        st.session_state.current_card = max(0, st.session_state.current_card - 1)
-                        st.session_state.show_answer = False
-                        st.rerun()
-                with col2:
-                    if st.button("🔄 Flip Card"):
-                        st.session_state.show_answer = not st.session_state.show_answer
-                        st.rerun()
-                with col3:
-                    if st.button("➡️ Next"):
-                        st.session_state.current_card = min(len(st.session_state.flashcards)-1, st.session_state.current_card + 1)
-                        st.session_state.show_answer = False
-                        st.rerun()
-    else:
-        st.info("📚 Run the learning workflow first to generate quiz and flashcards!")
-
-# =========================================================
-# PAGE: CHAT
-# =========================================================
-elif page == "💬 Chat":
-    st.markdown("### 💬 Chat with Your Summary")
+                    flashcards = workflow.generate_flashcards(checkpoint)
+                    st.session_state.flashcards = flashcards
+                    st.session_state.current_card_idx = 0
+                    st.session_state.card_flipped = False
+                    st.session_state.cards_reviewed = set()
+                    st.session_state.flashcards_viewed = True
+                st.rerun()
+        return
     
-    if st.session_state.workflow_result and st.session_state.workflow_result.get('summary'):
-        summary = st.session_state.workflow_result['summary']
-        
-        # Display chat history
-        for chat in st.session_state.chat_history:
-            st.markdown(f'''<div class="chat-message user-message"><strong>You:</strong> {chat['user']}</div>''', unsafe_allow_html=True)
-            st.markdown(f'''<div class="chat-message assistant-message"><strong>Assistant:</strong> {chat['assistant']}</div>''', unsafe_allow_html=True)
-        
-        # Chat input
-        user_question = st.text_input("Ask a question about the summary:", placeholder="e.g., What are the key concepts?")
-        
-        if st.button("📤 Send", use_container_width=True):
-            if user_question:
-                with st.spinner("Thinking..."):
-                    response = chat_with_summary(user_question, summary, st.session_state.chat_history)
-                    st.session_state.chat_history.append({
-                        'user': user_question,
-                        'assistant': response
-                    })
-                    st.rerun()
-        
-        if st.button("🗑️ Clear Chat History"):
-            st.session_state.chat_history = []
-            st.rerun()
-    else:
-        st.info("📚 Run the learning workflow first to start chatting!")
-
-# =========================================================
-# PAGE: ANALYTICS
-# =========================================================
-elif page == "📊 Analytics":
-    st.markdown("### 📊 Analytics & Insights")
+    flashcards = st.session_state.flashcards
+    total_cards = len(flashcards)
+    current_idx = st.session_state.current_card_idx
+    current_card = flashcards[current_idx]
     
-    if st.session_state.workflow_result:
-        result = st.session_state.workflow_result
-        contexts = result.get('gathered_contexts', [])
-        
-        if contexts:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 📚 Context Sources")
-                user_notes_count = sum(1 for c in contexts if c.source == "user_notes")
-                web_count = len(contexts) - user_notes_count
-                
-                st.markdown(f"""
-                    <div class="card">
-                        <p><strong>📝 From Your Notes:</strong> {user_notes_count}</p>
-                        <p><strong>🌐 From Web Search:</strong> {web_count}</p>
-                        <p><strong>📊 Total Sources:</strong> {len(contexts)}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown("#### 📈 Relevance Scores")
-                avg_score = sum(c.relevance_score or 0 for c in contexts) / len(contexts) if contexts else 0
-                st.markdown(f"""
-                    <div class="card">
-                        <p><strong>Average Relevance:</strong> {avg_score:.0%}</p>
-                        <p><strong>Quality Rating:</strong> {'⭐' * int(avg_score * 5)}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            st.markdown("#### 📄 Source Details")
-            for i, ctx in enumerate(contexts, 1):
-                with st.expander(f"Source {i}: {ctx.source.replace('_', ' ').title()} ({ctx.relevance_score:.0%})"):
-                    st.text(ctx.content[:500] + "..." if len(ctx.content) > 500 else ctx.content)
-        else:
-            st.info("Run the workflow to see analytics.")
-    else:
-        st.info("No data available yet. Run the workflow from the Dashboard.")
-
-# =========================================================
-# PAGE: SETTINGS
-# =========================================================
-elif page == "⚙️ Settings":
-    st.markdown("### ⚙️ Settings & Configuration")
+    # Progress bar
+    reviewed = len(st.session_state.cards_reviewed)
+    st.progress(reviewed / total_cards if total_cards > 0 else 0)
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📇 Card", f"{current_idx + 1} of {total_cards}")
+    with col2:
+        st.metric("✅ Reviewed", f"{reviewed}/{total_cards}")
+    with col3:
+        difficulty_emoji = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}.get(current_card.difficulty, "⚪")
+        st.metric("📊 Difficulty", f"{difficulty_emoji} {current_card.difficulty.title()}")
+    
+    st.markdown("---")
+    
+    # Flashcard Display
+    is_flipped = st.session_state.card_flipped
+    
+    # Card styling based on flip state
+    if not is_flipped:
+        # Front of card (Question)
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            padding: 3rem 2rem;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        ">
+            <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+                {current_card.category} • Click to flip
+            </div>
+            <div style="font-size: 1.5rem; color: white; font-weight: 600; line-height: 1.5;">
+                {current_card.front}
+            </div>
+            <div style="margin-top: 1.5rem;">
+                <span style="background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; color: white;">
+                    🔄 Click to reveal answer
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Back of card (Answer)
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 20px;
+            padding: 3rem 2rem;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(16, 185, 129, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        ">
+            <div style="font-size: 0.9rem; color: rgba(255,255,255,0.7); margin-bottom: 1rem;">
+                ✅ Answer
+            </div>
+            <div style="font-size: 1.3rem; color: white; font-weight: 500; line-height: 1.6;">
+                {current_card.back}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Mark as reviewed
+        st.session_state.cards_reviewed.add(current_card.id)
+    
+    st.markdown("")
+    
+    # Control buttons
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col1:
-        st.markdown("#### 🔧 Workflow Settings")
-        with st.expander("Advanced Options", expanded=True):
-            st.slider("Understanding Threshold", 0.0, 1.0, 0.55, 0.05)
-            st.slider("Max Retries", 1, 5, 3)
-            st.slider("Chunk Size", 100, 1000, 500, 50)
-        
-        st.markdown("#### 🤖 Model Info")
-        provider = os.getenv("MODEL_PROVIDER", "Not Set")
-        st.info(f"**Current Provider:** {provider.upper()}")
+        if current_idx > 0:
+            if st.button("⬅️ Previous", use_container_width=True):
+                st.session_state.current_card_idx -= 1
+                st.session_state.card_flipped = False
+                st.rerun()
     
     with col2:
-        st.markdown("#### 📋 Execution Logs")
-        if st.session_state.execution_logs:
-            for log in reversed(st.session_state.execution_logs[-10:]):
-                icon = {'info': 'ℹ️', 'success': '✅', 'error': '❌', 'warning': '⚠️'}.get(log['status'], 'ℹ️')
-                st.text(f"{icon} {log['time']} - {log['message']}")
+        if st.button("🔄 Flip Card", type="primary", use_container_width=True):
+            st.session_state.card_flipped = not st.session_state.card_flipped
+            st.rerun()
+    
+    with col3:
+        if current_idx < total_cards - 1:
+            if st.button("Next ➡️", use_container_width=True):
+                st.session_state.current_card_idx += 1
+                st.session_state.card_flipped = False
+                st.rerun()
+    
+    # Hint section
+    if current_card.hint and not is_flipped:
+        with st.expander("💡 Need a hint?"):
+            st.info(current_card.hint)
+    
+    st.markdown("---")
+    
+    # Card navigation grid
+    st.markdown("### 📇 All Cards")
+    cols = st.columns(10)
+    for i, card in enumerate(flashcards):
+        with cols[i % 10]:
+            is_reviewed = card.id in st.session_state.cards_reviewed
+            is_current = i == current_idx
+            
+            btn_type = "primary" if is_current else "secondary"
+            label = f"✓{i+1}" if is_reviewed else str(i+1)
+            
+            if st.button(label, key=f"card_nav_{i}", use_container_width=True,
+                        type=btn_type if is_current else "secondary"):
+                st.session_state.current_card_idx = i
+                st.session_state.card_flipped = False
+                st.rerun()
+    
+    # Completion message
+    if reviewed == total_cards:
+        st.success("🎉 You've reviewed all flashcards! Ready to take the quiz?")
+
+
+def render_quiz_tab(checkpoint: CheckpointDefinition, workflow):
+    """Render the quiz tab - displays all questions with instant feedback."""
+    
+    # Initialize feedback tracking in session state
+    if "question_feedback" not in st.session_state:
+        st.session_state.question_feedback = {}  # {question_id: {"checked": bool, "correct": bool, "explanation": str}}
+    
+    # Check if study is complete
+    try:
+        progress = workflow.progress_tracker._get_progress(checkpoint.id)
+        
+        if progress.status == CheckpointStatus.PASSED:
+            st.success("🎉 You've already passed this checkpoint!")
+            if st.button("📊 View Results"):
+                st.session_state.current_page = "results"
+            return
+        
+        if not progress.study_material_loaded:
+            st.warning("📚 Please complete the study material first!")
+            return
+        
+        if not progress.can_retry:
+            st.error("❌ No more attempts remaining. Please review the teaching material.")
+            return
+            
+    except:
+        st.warning("Please start the learning session from the home page.")
+        return
+    
+    # Generate quiz if needed
+    if not st.session_state.questions or st.session_state.quiz_submitted:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📝 Start Quiz (with Instant Feedback)", type="primary"):
+                with st.spinner("Generating quiz questions..."):
+                    questions = workflow.generate_quiz(checkpoint)
+                    st.session_state.questions = questions
+                    st.session_state.user_answers = {}
+                    st.session_state.question_feedback = {}
+                    st.session_state.quiz_submitted = False
+                    st.session_state.quiz_result = None
+                    st.session_state.instant_feedback_mode = True
+                    
+                    # Update progress
+                    workflow.progress_tracker.start_quiz(checkpoint.id)
+                    st.session_state.attempt_number = progress.attempt_count + 1
+                    
+                st.rerun()
+        return
+    
+    # Display all questions at once with instant feedback
+    questions = st.session_state.questions
+    total_questions = len(questions)
+    
+    # Calculate stats
+    answered = len(st.session_state.user_answers)
+    checked = len(st.session_state.question_feedback)
+    correct_count = sum(1 for f in st.session_state.question_feedback.values() if f.get("correct", False))
+    
+    # Header with progress
+    st.progress(checked / total_questions if total_questions > 0 else 0)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📝 Answered", f"{answered}/{total_questions}")
+    with col2:
+        st.metric("✅ Checked", f"{checked}/{total_questions}")
+    with col3:
+        st.metric("🎯 Correct", f"{correct_count}/{checked}" if checked > 0 else "0/0")
+    
+    st.markdown("---")
+    st.markdown("### 📝 Quiz with Instant Feedback")
+    st.info("💡 **How it works:** Answer each question, then click **'Check Answer'** to get instant feedback. Wrong answers will show a simplified explanation!")
+    
+    # Display ALL questions with instant feedback
+    for q_idx, question in enumerate(questions):
+        st.markdown("---")
+        
+        # Get feedback status for this question
+        feedback = st.session_state.question_feedback.get(question.id, {})
+        is_checked = feedback.get("checked", False)
+        is_correct = feedback.get("correct", False)
+        
+        # Question header with status indicator
+        if is_checked:
+            if is_correct:
+                st.markdown(f"### ✅ Question {q_idx + 1} of {total_questions} - CORRECT!")
+            else:
+                st.markdown(f"### ❌ Question {q_idx + 1} of {total_questions} - INCORRECT")
         else:
-            st.info("No logs yet.")
+            st.markdown(f"### Question {q_idx + 1} of {total_questions}")
+        
+        st.markdown(f"**{question.question_text}**")
+        
+        if question.objective:
+            st.caption(f"📎 Related to: {question.objective}")
+        
+        # Answer input based on question type (disabled if already checked)
+        current_answer = st.session_state.user_answers.get(question.id, "")
+        
+        if question.question_type == "multiple_choice" and question.options:
+            answer = st.radio(
+                f"Select your answer for Q{q_idx + 1}:",
+                options=question.options,
+                index=None,
+                key=f"q_{question.id}",
+                disabled=is_checked
+            )
+            if answer and not is_checked:
+                st.session_state.user_answers[question.id] = answer[0]  # Just the letter
+        
+        elif question.question_type == "true_false":
+            answer = st.radio(
+                f"Select your answer for Q{q_idx + 1}:",
+                options=["True", "False"],
+                index=None,
+                key=f"q_{question.id}",
+                disabled=is_checked
+            )
+            if answer and not is_checked:
+                st.session_state.user_answers[question.id] = answer
+        
+        else:  # short_answer
+            answer = st.text_area(
+                f"Your answer for Q{q_idx + 1}:",
+                value=current_answer,
+                key=f"q_{question.id}",
+                height=80,
+                disabled=is_checked
+            )
+            if answer and not is_checked:
+                st.session_state.user_answers[question.id] = answer
+        
+        # Action buttons for each question
+        if not is_checked:
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                # Check Answer button
+                has_answer = question.id in st.session_state.user_answers and st.session_state.user_answers[question.id]
+                if st.button(f"🔍 Check Answer", key=f"check_{question.id}", disabled=not has_answer):
+                    user_answer = st.session_state.user_answers.get(question.id, "")
+                    
+                    # Evaluate the answer
+                    is_correct = False
+                    if question.question_type in ["multiple_choice", "true_false"]:
+                        is_correct = user_answer.lower().strip() == question.correct_answer.lower().strip()
+                    else:
+                        # For short answers, check if keywords are present
+                        answer_lower = user_answer.lower()
+                        keyword_matches = sum(1 for kw in question.keywords if kw.lower() in answer_lower)
+                        is_correct = keyword_matches >= len(question.keywords) * 0.5  # 50% keyword match
+                    
+                    # Generate explanation for wrong answers
+                    explanation = ""
+                    if not is_correct:
+                        # Use Feynman teacher to generate simplified explanation
+                        try:
+                            feynman_result = workflow.feynman_teacher.explain_concept(
+                                concept=question.objective or question.question_text[:50],
+                                context=question.explanation or "",
+                                failed_question=question.question_text
+                            )
+                            # Combine simple explanation with analogy for better understanding
+                            explanation = f"{feynman_result.simple_explanation}\n\n**Analogy:** {feynman_result.analogy}"
+                        except Exception as e:
+                            explanation = question.explanation if question.explanation else f"The correct answer is: {question.correct_answer}"
+                    
+                    # Store feedback
+                    st.session_state.question_feedback[question.id] = {
+                        "checked": True,
+                        "correct": is_correct,
+                        "explanation": explanation,
+                        "correct_answer": question.correct_answer
+                    }
+                    st.rerun()
+            
+            with col2:
+                # Hint button
+                if st.button(f"💡 Get Hint", key=f"hint_{question.id}"):
+                    hint = workflow.get_hint(question)
+                    st.info(f"💡 **Hint:** {hint}")
+        
+        # Show feedback if question was checked
+        if is_checked:
+            if is_correct:
+                st.success(f"✅ **Correct!** Well done!")
+                if question.explanation:
+                    with st.expander("📖 Learn more"):
+                        st.markdown(question.explanation)
+            else:
+                st.error(f"❌ **Incorrect.** The correct answer is: **{feedback.get('correct_answer', question.correct_answer)}**")
+                
+                # Show Feynman-style explanation
+                st.markdown("---")
+                st.markdown("#### 🎓 Let me explain this simply:")
+                
+                explanation = feedback.get("explanation", "")
+                if explanation:
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); 
+                                color: #065f46; 
+                                border-radius: 12px; 
+                                padding: 1.5rem; 
+                                margin: 0.5rem 0;">
+                        <p style="margin: 0;">{explanation}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info(f"📖 {question.explanation if question.explanation else 'Review the study material for this concept.'}")
+    
+    # Submit section at the bottom
+    st.markdown("---")
+    st.markdown("---")
+    
+    # Summary
+    all_checked = checked == total_questions
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if not all_checked:
+            remaining = total_questions - checked
+            st.warning(f"⚠️ {remaining} question(s) not yet checked. Check all answers to see your final score!")
+        else:
+            score_percent = (correct_count / total_questions) * 100 if total_questions > 0 else 0
+            if score_percent >= 70:
+                st.success(f"🎉 **Score: {score_percent:.0f}%** - You passed! ({correct_count}/{total_questions} correct)")
+            else:
+                st.error(f"📚 **Score: {score_percent:.0f}%** - You need 70% to pass. ({correct_count}/{total_questions} correct)")
+    
+    with col2:
+        if all_checked:
+            if st.button("✅ Submit Final Results", type="primary"):
+                with st.spinner("Saving your results..."):
+                    result = workflow.evaluate_quiz(
+                        questions=questions,
+                        user_answers=st.session_state.user_answers,
+                        checkpoint_id=checkpoint.id,
+                        attempt_number=st.session_state.attempt_number
+                    )
+                    st.session_state.quiz_result = result
+                    st.session_state.quiz_submitted = True
+                st.rerun()
+
+
+def render_results_tab(checkpoint: CheckpointDefinition, workflow):
+    """Render the results tab."""
+    result = st.session_state.quiz_result
+    
+    if not result:
+        st.info("📝 Complete a quiz to see your results here.")
+        return
+    
+    # Score display
+    score_pct = result.total_score * 100
+    passed = result.passed
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown(
+            f"<div class='score-display {'score-pass' if passed else 'score-fail'}'>"
+            f"{score_pct:.0f}%</div>",
+            unsafe_allow_html=True
+        )
+        
+        if passed:
+            st.success("🎉 Congratulations! You passed!")
+        else:
+            st.error(f"📚 You need 70% to pass. Keep learning!")
+    
+    with col2:
+        st.markdown("### Quiz Summary")
+        
+        correct = sum(1 for s in result.scores.values() if s >= 0.7)
+        total = len(result.scores)
+        
+        st.metric("Correct Answers", f"{correct}/{total}")
+        st.metric("Attempt", f"#{result.attempt_number}")
+        
+        if result.weak_concepts:
+            st.markdown("**Areas to Review:**")
+            for concept in result.weak_concepts:
+                st.markdown(f"- {concept}")
+    
+    st.markdown("---")
+    
+    # Detailed results
+    st.markdown("### 📋 Detailed Answers")
+    
+    for i, q in enumerate(result.questions):
+        score = result.scores.get(q.id, 0)
+        user_ans = result.user_answers.get(q.id, "No answer")
+        
+        with st.expander(f"Q{i+1}: {q.question_text[:50]}... {'✅' if score >= 0.7 else '❌'}"):
+            st.markdown(f"**Your Answer:** {user_ans}")
+            st.markdown(f"**Correct Answer:** {q.correct_answer}")
+            st.markdown(f"**Score:** {score * 100:.0f}%")
+            if q.explanation:
+                st.info(f"📖 {q.explanation}")
+    
+    st.markdown("---")
+    
+    # Next actions
+    if passed:
+        if st.button("➡️ Continue to Next Topic", type="primary"):
+            next_cp = workflow.move_to_next_checkpoint()
+            if next_cp:
+                st.session_state.current_checkpoint_id = next_cp.checkpoint_id
+                st.session_state.questions = []
+                st.session_state.quiz_result = None
+                st.session_state.study_content = ""
+                st.rerun()
+            else:
+                st.balloons()
+                st.success("🎓 Congratulations! You've completed all checkpoints!")
+    else:
+        # Show Feynman teaching
+        if result.weak_concepts:
+            st.markdown("### 🎓 Let's Review Together")
+            st.markdown("I'll explain the concepts you struggled with in simple terms.")
+            
+            if st.button("📚 Get Personalized Explanation", type="primary"):
+                with st.spinner("Creating your personalized lesson..."):
+                    teaching_content = workflow.teach_weak_concepts(
+                        result.weak_concepts,
+                        checkpoint
+                    )
+                    st.session_state.feynman_content = teaching_content
+                st.rerun()
+        
+        if st.session_state.feynman_content:
+            st.markdown(st.session_state.feynman_content)
+            
+            # Check if can retry
+            try:
+                progress = workflow.progress_tracker._get_progress(checkpoint.id)
+                if progress.can_retry:
+                    st.markdown("---")
+                    st.info(f"📝 You have {progress.attempts_remaining} attempts remaining.")
+                    
+                    if st.button("🔄 Retake Quiz", type="primary"):
+                        st.session_state.questions = []
+                        st.session_state.quiz_result = None
+                        st.session_state.feynman_content = ""
+                        st.session_state.quiz_submitted = False
+                        st.rerun()
+            except:
+                pass
+
 
 # =========================================================
-# FOOTER
+# MAIN APPLICATION
 # =========================================================
-st.markdown('''
-    <div class="footer">
-        <p><strong>Autonomous Learning Agent v2.0</strong> • AI-Powered Study Assistant</p>
-        <p>Built with ❤️ using Streamlit, LangGraph & Groq</p>
-        <p style="font-size: 0.75rem; color: #94a3b8;">Features: Quiz • Flashcards • Feynman • Chat • Export</p>
-    </div>
-''', unsafe_allow_html=True)
+
+def main():
+    """Main application entry point."""
+    # Initialize
+    apply_custom_css()
+    init_session_state()
+    
+    # Render header
+    render_header()
+    
+    # Render sidebar
+    render_progress_sidebar()
+    
+    # Main content
+    if st.session_state.current_page == "home" or not st.session_state.session_started:
+        render_home_page()
+    elif st.session_state.current_page == "checkpoint":
+        render_checkpoint_page()
+    else:
+        render_home_page()
+    
+    # Footer
+    st.markdown("---")
+    st.caption("🎓 Autonomous Learning Agent v3.0 • Built with Streamlit, FAISS & Hugging Face")
+
+
+if __name__ == "__main__":
+    main()

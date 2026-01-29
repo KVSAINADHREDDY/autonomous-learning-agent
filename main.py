@@ -1,13 +1,19 @@
+# -*- coding: utf-8 -*-
 """Main entry point for the Autonomous Learning Agent."""
 import sys
+import io
 from pathlib import Path
+
+# Fix Windows console encoding
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.models.checkpoint import Checkpoint
-from src.models.state import create_initial_state
-from src.graph.learning_graph import create_learning_graph
+from src.data.checkpoints import CheckpointDefinition
+from src.graph.learning_graph import get_learning_workflow, LearningState
 
 
 def main():
@@ -16,17 +22,44 @@ def main():
     print()
     
     # Create a learning checkpoint
-    checkpoint = Checkpoint(
+    checkpoint = CheckpointDefinition(
+        id="python_functions",
         topic="Python Functions and Parameters",
         objectives=[
             "Understand function definition syntax",
             "Learn how to use function parameters",
             "Master return values and function calls"
-        ]
+        ],
+        difficulty="beginner",
+        estimated_minutes=15,
+        notes=r"""
+        ## Python Functions
+        
+        Functions in Python are reusable blocks of code that perform specific tasks.
+        
+        ### Defining Functions
+        Use the `def` keyword to define a function:
+        ```python
+        def function_name(parameters):
+            # function body
+            return value
+        ```
+        
+        ### Parameters
+        - **Positional parameters**: Must be passed in order
+        - **Keyword parameters**: Can be passed by name
+        - **Default parameters**: Have default values
+        - **\*args**: Variable number of positional arguments
+        - **\*\*kwargs**: Variable number of keyword arguments
+        
+        ### Return Values
+        Functions can return values using the `return` statement.
+        Multiple values can be returned as a tuple.
+        """
     )
     
-    print(f"📚 Learning Topic: {checkpoint.topic}")
-    print("🎯 Objectives:")
+    print(f"[TOPIC] Learning Topic: {checkpoint.topic}")
+    print("[OBJECTIVES]")
     for i, obj in enumerate(checkpoint.objectives, 1):
         print(f"   {i}. {obj}")
     print()
@@ -38,26 +71,24 @@ def main():
     Example: def greet(name): return f"Hello {name}"
     """
     
-    print("📝 User Notes Provided:")
+    print("[NOTES] User Notes Provided:")
     print(user_notes.strip())
     print()
     
-    # Initialize state
+    # Initialize workflow
     print("-" * 70)
     print("INITIALIZING WORKFLOW...")
     print("-" * 70)
     print()
     
-    state = create_initial_state(
-        checkpoint=checkpoint,
-        user_notes=user_notes
-    )
+    workflow = get_learning_workflow()
     
-    # Create workflow graph
-    graph = create_learning_graph()
+    # Start a learning session with our checkpoint
+    workflow.start_learning_session([checkpoint])
     
-    print("✓ Workflow initialized")
-    print("✓ Learning graph created")
+    print("[OK] Workflow initialized")
+    print("[OK] Learning session started")
+    print("[OK] Learning workflow created")
     print()
     
     # Execute workflow
@@ -67,7 +98,7 @@ def main():
     print()
     
     try:
-        result = graph.invoke(state)
+        result = workflow.run_complete_workflow(checkpoint, user_notes)
         
         print()
         print("-" * 70)
@@ -76,43 +107,62 @@ def main():
         print()
         
         # Display results
-        print(f"Final Stage: {result['current_stage']}")
-        print(f"Contexts Gathered: {len(result['gathered_contexts'])}")
-        print(f"Context Validation: {'✅ Valid' if result.get('context_valid') else '❌ Invalid'}")
-        print(f"Retry Attempts: {result['retry_count']}")
+        print(f"Final Stage: {result.current_stage}")
+        print(f"Sources Gathered: {len(result.sources)}")
+        print(f"Questions Generated: {len(result.questions)}")
         
         # Show error if any
-        if result.get("error"):
+        if result.error:
             print()
-            print(f"  Error: {result['error']}")
-            if "API key" in result['error'] or "GITHUB_TOKEN" in result['error']:
+            print(f"  Error: {result.error}")
+            if "API key" in result.error or "GITHUB_TOKEN" in result.error:
                 print()
                 print(" Note: Configure your .env file with API keys to enable full functionality.")
                 print("   See SETUP.md for instructions.")
         
-        # Show gathered contexts
-        if result["gathered_contexts"]:
+        # Show gathered sources
+        if result.sources:
             print()
-            print(f" Sample Gathered Context ({len(result['gathered_contexts'])} total):")
+            print(f"[SOURCES] Study Sources ({len(result.sources)} total):")
             print()
-            for i, context in enumerate(result["gathered_contexts"][:3], 1):
-                print(f"   {i}. Source: {context.source}")
-                print(f"      Relevance: {context.relevance_score:.2f}")
-                print(f"      Preview: {context.content[:80]}...")
+            for i, source in enumerate(result.sources[:3], 1):
+                print(f"   {i}. Type: {source.get('type', 'unknown')}")
+                print(f"      Title: {source.get('title', 'N/A')}")
+                content = source.get('content', '')[:80]
+                if content:
+                    print(f"      Preview: {content}...")
+                print()
+        
+        # Show generated questions
+        if result.questions:
+            print()
+            print(f"[QUIZ] Quiz Questions ({len(result.questions)} generated):")
+            print()
+            for i, question in enumerate(result.questions[:3], 1):
+                print(f"   {i}. {question.question[:80]}...")
                 print()
         
         print("-" * 70)
         
+        # Show messages
+        if result.messages:
+            print()
+            print("[MESSAGES] Workflow Messages:")
+            for msg in result.messages:
+                print(f"   - {msg}")
+            print()
+        
         # Determine success
-        if result["current_stage"] == "context_processed":
-            print(" WORKFLOW COMPLETED SUCCESSFULLY")
+        if result.current_stage == "quiz_ready":
+            print("[SUCCESS] WORKFLOW COMPLETED SUCCESSFULLY")
+            print("   Quiz is ready! In the full app, users would take the quiz interactively.")
             return 0
-        elif result.get("error"):
-            print("  WORKFLOW COMPLETED WITH ERRORS")
+        elif result.error:
+            print("[WARNING] WORKFLOW COMPLETED WITH ERRORS")
             return 1
         else:
-            print("  WORKFLOW INCOMPLETE")
-            return 1
+            print("[STATUS] WORKFLOW STATUS: " + result.current_stage)
+            return 0
             
     except Exception as e:
         print()

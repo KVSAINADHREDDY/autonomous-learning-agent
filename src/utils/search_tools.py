@@ -1,13 +1,16 @@
-"""Search tools for gathering learning content."""
+"""
+Search tools for gathering learning content.
+Supports Tavily (primary), SerpAPI, and DuckDuckGo (fallback).
+"""
 import os
 from typing import List, Dict, Any
 
-# Try to import search libraries
+# Try importing search libraries
 try:
-    from googlesearch import search as google_search
-    GOOGLE_SEARCH_AVAILABLE = True
+    from tavily import TavilyClient
+    TAVILY_AVAILABLE = True
 except ImportError:
-    GOOGLE_SEARCH_AVAILABLE = False
+    TAVILY_AVAILABLE = False
 
 try:
     from duckduckgo_search import DDGS
@@ -16,73 +19,78 @@ except ImportError:
     DUCKDUCKGO_AVAILABLE = False
 
 
-class SerpAPISearch:
-    """Wrapper for SerpAPI Google search."""
+class TavilySearch:
+    """Tavily API search - Best quality, 100 free searches/month."""
     
     def __init__(self):
-        """Initialize SerpAPI search."""
-        api_key = os.getenv("SERP_API_KEY")
+        """Initialize Tavily search."""
+        api_key = os.getenv("TAVILY_API_KEY")
         if not api_key:
-            raise ValueError("SERP_API_KEY not found in environment")
+            raise ValueError("TAVILY_API_KEY not found in environment")
         
-        try:
-            from serpapi import GoogleSearch
-            self.GoogleSearch = GoogleSearch
-            self.api_key = api_key
-        except ImportError:
-            raise ImportError(
-                "google-search-results not installed. Install it with: pip install google-search-results"
-            )
+        if not TAVILY_AVAILABLE:
+            raise ImportError("tavily-python not installed. Run: pip install tavily-python")
+        
+        self.client = TavilyClient(api_key=api_key)
+        print("✅ Tavily search initialized")
     
     def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
-        Search using SerpAPI.
+        Search using Tavily API.
         
         Args:
             query: Search query
-            max_results: Maximum number of results to return
+            max_results: Maximum number of results
             
         Returns:
-            List of search results with title, link, and snippet
+            List of search results with title, url, and content
         """
         try:
-            params = {
-                "q": query,
-                "api_key": self.api_key,
-                "num": max_results,
-                "engine": "google"
-            }
+            # Tavily search with content extraction
+            response = self.client.search(
+                query=query,
+                search_depth="advanced",
+                max_results=max_results,
+                include_answer=True,
+                include_raw_content=False
+            )
             
-            search = self.GoogleSearch(params)
-            results = search.get_dict()
+            results = []
             
-            organic_results = results.get("organic_results", [])
-            
-            formatted_results = []
-            for result in organic_results[:max_results]:
-                formatted_results.append({
-                    "title": result.get("title", ""),
-                    "url": result.get("link", ""),
-                    "snippet": result.get("snippet", "")
+            # Add the AI-generated answer if available
+            if response.get("answer"):
+                results.append({
+                    "title": "AI Summary",
+                    "url": "",
+                    "content": response["answer"],
+                    "snippet": response["answer"][:200]
                 })
             
-            return formatted_results
+            # Add search results
+            for result in response.get("results", []):
+                results.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("url", ""),
+                    "content": result.get("content", ""),
+                    "snippet": result.get("content", "")[:200] if result.get("content") else ""
+                })
+            
+            return results[:max_results]
             
         except Exception as e:
-            print(f"SerpAPI search error: {e}")
+            print(f"Tavily search error: {e}")
             return []
 
 
 class DuckDuckGoSearch:
-    """Wrapper for DuckDuckGo search (free, no API key needed)."""
+    """DuckDuckGo search - Free, no API key needed."""
     
     def __init__(self):
         """Initialize DuckDuckGo search."""
         if not DUCKDUCKGO_AVAILABLE:
-            raise ImportError(
-                "duckduckgo-search not installed. Install it with: pip install duckduckgo-search"
-            )
+            raise ImportError("duckduckgo-search not installed. Run: pip install duckduckgo-search")
         self.ddgs = DDGS()
+        print("✅ DuckDuckGo search initialized")
     
     def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
@@ -90,10 +98,10 @@ class DuckDuckGoSearch:
         
         Args:
             query: Search query
-            max_results: Maximum number of results to return
+            max_results: Maximum number of results
             
         Returns:
-            List of search results with title, link, and snippet
+            List of search results
         """
         try:
             results = list(self.ddgs.text(query, max_results=max_results))
@@ -103,6 +111,7 @@ class DuckDuckGoSearch:
                 formatted_results.append({
                     "title": result.get("title", ""),
                     "url": result.get("href", ""),
+                    "content": result.get("body", ""),
                     "snippet": result.get("body", "")
                 })
             
@@ -113,18 +122,32 @@ class DuckDuckGoSearch:
             return []
 
 
+def get_search_tool():
+    """Get the best available search tool."""
+    # Try Tavily first (best quality)
+    try:
+        return TavilySearch()
+    except (ValueError, ImportError) as e:
+        print(f"Tavily not available: {e}")
+    
+    # Fallback to DuckDuckGo
+    try:
+        return DuckDuckGoSearch()
+    except ImportError as e:
+        print(f"DuckDuckGo not available: {e}")
+    
+    return None
+
+
 def search_for_learning_content(
     topic: str,
     objectives: List[str],
     max_results: int = 5
 ) -> List[Dict[str, Any]]:
     """
-    Search for learning content using multiple diverse queries.
+    Search for learning content using available search tools.
     
-    Uses 3 different query formulations to get diverse results:
-    1. "{topic} tutorial guide"
-    2. "{topic} explained with examples"
-    3. "{topic} {first_objective}"
+    Creates multiple diverse queries for comprehensive coverage.
     
     Args:
         topic: The learning topic
@@ -132,49 +155,48 @@ def search_for_learning_content(
         max_results: Maximum total results to return
         
     Returns:
-        List of search results with title, url, and snippet
+        List of search results with title, url, content, and snippet
     """
-    # Create 3 diverse queries
+    # Create diverse queries
     queries = [
-        f"{topic} tutorial guide",
-        f"{topic} explained with examples",
-        f"{topic} {objectives[0] if objectives else 'basics'}",
+        f"{topic} tutorial beginner guide",
+        f"{topic} explained simply with examples",
+        f"what is {topic} definition concepts",
     ]
     
-    # Try SerpAPI first (best quality, 100 free searches/month)
-    try:
-        search_tool = SerpAPISearch()
-        print("Using SerpAPI search (recommended)")
-    except (ValueError, ImportError) as e:
-        print(f"SerpAPI not available: {e}")
-        # Fallback to DuckDuckGo (free, unlimited)
-        try:
-            search_tool = DuckDuckGoSearch()
-            print("Using DuckDuckGo search (free fallback)")
-        except ImportError:
-            print("No search tools available. Install serpapi or duckduckgo-search")
-            return []
+    # Add objective-specific queries
+    if objectives:
+        queries.append(f"{topic} {objectives[0]}")
+    
+    # Get search tool
+    search_tool = get_search_tool()
+    
+    if not search_tool:
+        print("⚠️ No search tools available")
+        return []
     
     all_results = []
     seen_urls = set()
     
-    # Execute all queries and collect unique results
     for query in queries:
-        print(f"Searching for: {query}")
+        print(f"🔍 Searching: {query}")
         results = search_tool.search(query, max_results=max(2, max_results // len(queries)))
         
-        # Add unique results only
         for result in results:
             url = result.get('url', '')
-            if url and url not in seen_urls:
+            # Deduplicate by URL
+            if url and url in seen_urls:
+                continue
+            if url:
                 seen_urls.add(url)
-                all_results.append(result)
-                
-                if len(all_results) >= max_results:
-                    break
+            
+            all_results.append(result)
+            
+            if len(all_results) >= max_results:
+                break
         
         if len(all_results) >= max_results:
             break
     
-    print(f"Found {len(all_results)} unique results")
+    print(f"📚 Found {len(all_results)} unique results")
     return all_results[:max_results]

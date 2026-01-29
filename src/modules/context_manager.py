@@ -80,7 +80,7 @@ class ContextManager:
         unique_results = 0
         for result in search_results:
             url = result.get('url', '')
-            content = result.get('content', '')
+            content = result.get('snippet', '')  # Search APIs return 'snippet', not 'content'
             
             # Skip if we've seen this URL or if there's no content
             if not content:
@@ -283,8 +283,12 @@ Score (0.0-1.0):""")
         Returns:
             Summary text
         """
-        # Filter to relevant contexts (lowered threshold)
+        # Filter to relevant contexts, but use all if none meet threshold
         relevant_contexts = [c for c in contexts if c.relevance_score and c.relevance_score >= 0.4]
+        
+        # If no contexts meet threshold, use all contexts (better than nothing)
+        if not relevant_contexts:
+            relevant_contexts = contexts
         
         if not relevant_contexts:
             return "No relevant context available."

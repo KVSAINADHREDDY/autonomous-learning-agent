@@ -1,4 +1,14 @@
 """Learning graph module."""
-from src.graph.learning_graph import create_learning_graph, LearningGraph
+from src.graph.learning_graph import (
+    get_learning_workflow,
+    reset_learning_workflow,
+    LearningWorkflow,
+    LearningState
+)
 
-__all__ = ["create_learning_graph", "LearningGraph"]
+__all__ = [
+    "get_learning_workflow",
+    "reset_learning_workflow",
+    "LearningWorkflow",
+    "LearningState"
+]
