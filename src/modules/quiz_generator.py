@@ -70,7 +70,12 @@ class QuizGenerator:
     
     def __init__(self, questions_per_quiz: int = None):
         """Initialize the quiz generator."""
-        self.questions_per_quiz = questions_per_quiz or int(os.getenv("QUESTIONS_PER_QUIZ", "5"))
+        # Reload dotenv to get latest settings
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+        
+        self.questions_per_quiz = questions_per_quiz or int(os.getenv("QUESTIONS_PER_QUIZ", "15"))
+        print(f"📝 Quiz generator initialized with {self.questions_per_quiz} questions per quiz")
         self.llm = None  # Lazy initialization
         self.vector_store = get_vector_store()
     
@@ -155,7 +160,9 @@ class QuizGenerator:
         """Create the prompt for question generation."""
         objectives_text = "\n".join(f"- {obj}" for obj in objectives)
         
-        return f"""Generate {num_questions} quiz questions about "{topic}".
+        return f"""You MUST generate exactly {num_questions} quiz questions about "{topic}".
+
+IMPORTANT: Generate ALL {num_questions} questions. Do not stop early.
 
 Learning Objectives:
 {objectives_text}
@@ -163,7 +170,7 @@ Learning Objectives:
 Study Material:
 {context[:3000]}
 
-Generate questions in this exact JSON format:
+Generate questions in this exact JSON format (example for 1 question, you must generate {num_questions}):
 ```json
 [
   {{
@@ -176,19 +183,21 @@ Generate questions in this exact JSON format:
     "explanation": "The correct answer is A because...",
     "objective": "Understanding basic concepts",
     "difficulty": "easy"
-  }}
+  }},
+  // ... continue for questions 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 ]
 ```
 
 Requirements:
-1. Mix of question types: multiple_choice, short_answer, true_false
-2. Cover all learning objectives
-3. Include helpful hints
-4. Provide clear explanations
-5. Keywords for grading short answers
-6. Vary difficulty (easy, medium, hard)
+1. Generate EXACTLY {num_questions} questions - no more, no less
+2. Mix of question types: multiple_choice (at least 10), short_answer (2-3), true_false (2-3)
+3. Cover all learning objectives across the questions
+4. Include helpful hints for each question
+5. Provide clear explanations for correct answers
+6. Keywords for grading short answers
+7. Vary difficulty: 5 easy, 6 medium, 4 hard
 
-Generate exactly {num_questions} questions:"""
+OUTPUT: Return ONLY the JSON array with all {num_questions} questions:"""
     
     def _parse_questions(
         self,
