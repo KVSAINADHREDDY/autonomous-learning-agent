@@ -506,8 +506,25 @@ def render_progress_sidebar():
             icon = "⬜"
         
         if st.sidebar.button(f"{icon} {i}. {cp.topic}", key=f"nav_{cp.id}", use_container_width=True):
+            # Start session if not started
+            if not st.session_state.session_started:
+                reset_learning_workflow()
+                workflow = get_learning_workflow()
+                workflow.start_learning_session(checkpoints)
+                st.session_state.session_started = True
+            
+            # Navigate to the selected checkpoint
             st.session_state.current_checkpoint_id = cp.id
             st.session_state.current_page = "checkpoint"
+            st.session_state.current_step = "study"  # Reset to study step
+            
+            # Reset quiz state for new topic
+            st.session_state.quiz_questions = []
+            st.session_state.quiz_submitted = False
+            st.session_state.quiz_result = None
+            st.session_state.flashcards = []
+            st.session_state.flashcards_viewed = False
+            
             st.rerun()
 
 
@@ -1035,7 +1052,79 @@ def render_quiz_tab(checkpoint: CheckpointDefinition, workflow):
             return
         
         if not progress.can_retry:
-            st.error("❌ No more attempts remaining. Please review the teaching material.")
+            st.error("❌ No more attempts remaining for this topic.")
+            st.markdown("")
+            
+            # Show helpful options
+            st.markdown("### 🎓 What would you like to do?")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("""
+                <div style="text-align: center; padding: 1rem; background: rgba(251, 191, 36, 0.1); border-radius: 12px; border: 1px solid rgba(251, 191, 36, 0.3);">
+                    <div style="font-size: 2rem;">🎓</div>
+                    <div style="font-weight: 600; color: #fbbf24;">Feynman Teaching</div>
+                    <div style="font-size: 0.85rem; color: #94a3b8;">Get simple explanations</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("📖 Get Teaching", use_container_width=True):
+                    # Show Feynman explanation for the topic
+                    with st.spinner("Generating Feynman explanation..."):
+                        explanation = workflow.feynman_teacher.explain_concept(
+                            concept=checkpoint.topic,
+                            context=st.session_state.study_content or checkpoint.notes or "",
+                            failed_question=f"Help me understand {checkpoint.topic} better"
+                        )
+                        if explanation:
+                            st.markdown("### 🎓 Feynman Explanation")
+                            st.info(f"**Simple Explanation:** {explanation.simple_explanation}")
+                            if explanation.analogy:
+                                st.success(f"**Analogy:** {explanation.analogy}")
+            
+            with col2:
+                st.markdown("""
+                <div style="text-align: center; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.3);">
+                    <div style="font-size: 2rem;">🔄</div>
+                    <div style="font-weight: 600; color: #10b981;">Reset & Retry</div>
+                    <div style="font-size: 0.85rem; color: #94a3b8;">Start fresh with this topic</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("🔄 Reset Topic", use_container_width=True):
+                    # Reset this checkpoint's progress
+                    workflow.progress_tracker.reset_checkpoint(checkpoint.id)
+                    st.session_state.quiz_questions = []
+                    st.session_state.quiz_submitted = False
+                    st.session_state.quiz_result = None
+                    st.session_state.question_feedback = {}
+                    st.session_state.current_step = "study"
+                    st.success("✅ Topic reset! You can now retry.")
+                    st.rerun()
+            
+            with col3:
+                st.markdown("""
+                <div style="text-align: center; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.3);">
+                    <div style="font-size: 2rem;">➡️</div>
+                    <div style="font-weight: 600; color: #667eea;">Next Topic</div>
+                    <div style="font-size: 0.85rem; color: #94a3b8;">Move to next checkpoint</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("➡️ Next Topic", use_container_width=True):
+                    # Find next checkpoint
+                    checkpoints = get_all_checkpoints()
+                    current_idx = next((i for i, cp in enumerate(checkpoints) if cp.id == checkpoint.id), 0)
+                    next_idx = (current_idx + 1) % len(checkpoints)
+                    next_checkpoint = checkpoints[next_idx]
+                    
+                    st.session_state.current_checkpoint_id = next_checkpoint.id
+                    st.session_state.current_step = "study"
+                    st.session_state.quiz_questions = []
+                    st.session_state.quiz_submitted = False
+                    st.session_state.quiz_result = None
+                    st.session_state.flashcards = []
+                    st.session_state.flashcards_viewed = False
+                    st.rerun()
+            
             return
             
     except:

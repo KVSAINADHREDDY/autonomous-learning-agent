@@ -5,6 +5,7 @@ Uses LLM to generate questions based on study material from vector store.
 import os
 import re
 import json
+import random
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,7 +75,7 @@ class QuizGenerator:
         from dotenv import load_dotenv
         load_dotenv(override=True)
         
-        self.questions_per_quiz = questions_per_quiz or int(os.getenv("QUESTIONS_PER_QUIZ", "15"))
+        self.questions_per_quiz = questions_per_quiz or int(os.getenv("QUESTIONS_PER_QUIZ", "10"))
         print(f"📝 Quiz generator initialized with {self.questions_per_quiz} questions per quiz")
         self.llm = None  # Lazy initialization
         self.vector_store = get_vector_store()
@@ -157,12 +158,36 @@ class QuizGenerator:
         context: str,
         num_questions: int
     ) -> str:
-        """Create the prompt for question generation."""
+        """Create the prompt for question generation with randomness for unique questions."""
         objectives_text = "\n".join(f"- {obj}" for obj in objectives)
         
-        return f"""You MUST generate exactly {num_questions} quiz questions about "{topic}".
+        # Add randomness to generate different questions each time
+        random_seed = random.randint(1000, 9999)
+        random_focus = random.choice([
+            "Focus on practical applications and real-world examples.",
+            "Focus on theoretical concepts and definitions.",
+            "Focus on comparisons and contrasts between concepts.",
+            "Focus on problem-solving and critical thinking.",
+            "Focus on historical context and evolution of ideas.",
+            "Focus on common misconceptions and how to avoid them.",
+            "Focus on step-by-step processes and methodologies.",
+            "Focus on advantages, disadvantages, and trade-offs."
+        ])
+        
+        random_style = random.choice([
+            "Use scenario-based questions where possible.",
+            "Include questions that test understanding of relationships between concepts.",
+            "Ask questions that require applying knowledge to new situations.",
+            "Include some questions about edge cases and exceptions.",
+            "Mix abstract questions with concrete examples."
+        ])
+        
+        return f"""You MUST generate exactly {num_questions} UNIQUE quiz questions about "{topic}".
 
-IMPORTANT: Generate ALL {num_questions} questions. Do not stop early.
+RANDOMIZATION SEED: {random_seed} - Use this to ensure questions are different from previous generations.
+
+FOCUS: {random_focus}
+STYLE: {random_style}
 
 Learning Objectives:
 {objectives_text}
@@ -170,7 +195,7 @@ Learning Objectives:
 Study Material:
 {context[:3000]}
 
-Generate questions in this exact JSON format (example for 1 question, you must generate {num_questions}):
+Generate questions in this exact JSON format:
 ```json
 [
   {{
@@ -183,21 +208,20 @@ Generate questions in this exact JSON format (example for 1 question, you must g
     "explanation": "The correct answer is A because...",
     "objective": "Understanding basic concepts",
     "difficulty": "easy"
-  }},
-  // ... continue for questions 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  }}
 ]
 ```
 
 Requirements:
-1. Generate EXACTLY {num_questions} questions - no more, no less
-2. Mix of question types: multiple_choice (at least 10), short_answer (2-3), true_false (2-3)
+1. Generate EXACTLY {num_questions} UNIQUE questions - different from any previous quiz
+2. Question types: 7 multiple_choice, 2 short_answer, 1 true_false
 3. Cover all learning objectives across the questions
 4. Include helpful hints for each question
 5. Provide clear explanations for correct answers
 6. Keywords for grading short answers
-7. Vary difficulty: 5 easy, 6 medium, 4 hard
+7. Difficulty distribution: 3 easy, 4 medium, 3 hard
 
-OUTPUT: Return ONLY the JSON array with all {num_questions} questions:"""
+OUTPUT: Return ONLY the JSON array with all {num_questions} unique questions:"""
     
     def _parse_questions(
         self,
